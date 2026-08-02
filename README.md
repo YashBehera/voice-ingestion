@@ -50,6 +50,30 @@ graph TD
     RingBuf3 --> Analytics
 ```
 
+### Ingestion Sequence Flow
+
+```mermaid
+sequenceDiagram
+    participant UI as static/app.js
+    participant WS as websocket.go
+    participant P as pipeline.go
+    participant O as encoder.go
+    participant R as red.go
+    participant B as broker.go
+    participant C as consumers
+
+    UI->>WS: ① binary PCM, 16 kHz
+    WS->>P: ② PushPCM(samples, 16000, "websocket")
+    P->>P: ③ resample to 48 kHz; collect 960 samples
+    P->>O: ④ Encode(960 PCM samples)
+    O-->>P: variable-length Opus payload
+    P->>R: ⑤ Pack(Opus)
+    R-->>P: RED MediaPacket
+    P->>B: ⑥ Publish(packet)
+    B->>C: ⑦ one isolated queue per consumer
+    C-->>C: ⑧ VAD, WAV recording, analytics 
+```
+
 ### How It Works
 
 *   **Ingestion**: WebSockets (`/ws/ingest`) for browser microphone data, UDP/RTP (`:5004`) for network audio streams, and a WAV-file loop for testing. The RTP receiver integrates a sequence buffer to handle out-of-order delivery and RED payload recovery.
