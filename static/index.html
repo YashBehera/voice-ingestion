@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Ingestion Worker Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Space+Grotesk:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0a0b10;
+            --bg-secondary: rgba(20, 21, 33, 0.6);
+            --border-color: rgba(255, 255, 255, 0.08);
+            --text-primary: #f3f4f6;
+            --text-secondary: #9ca3af;
+            --accent-neon: #10b981;
+            --accent-pulse: #06b6d4;
+            --accent-alert: #ef4444;
+            --card-glow: rgba(16, 185, 129, 0.05);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+            background-image: 
+                radial-gradient(circle at 10% 20%, rgba(6, 182, 212, 0.08) 0%, transparent 40%),
+                radial-gradient(circle at 90% 80%, rgba(16, 185, 129, 0.08) 0%, transparent 40%);
+        }
+
+        header {
+            padding: 1.5rem 2rem;
+            border-bottom: 1px solid var(--border-color);
+            background: rgba(10, 11, 16, 0.8);
+            backdrop-filter: blur(12px);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        h1 {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 1.5rem;
+            font-weight: 700;
+            letter-spacing: -0.03em;
+            background: linear-gradient(135deg, #fff 30%, #a7f3d0 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        h1::before {
+            content: '';
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: var(--accent-neon);
+            box-shadow: 0 0 10px var(--accent-neon);
+        }
+
+        .status-badge {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            color: var(--accent-neon);
+            padding: 0.35rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        .main-container {
+            max-width: 1400px;
+            margin: 2rem auto;
+            padding: 0 1.5rem;
+            width: 100%;
+            flex-grow: 1;
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 1.5rem;
+        }
+
+        @media (max-width: 1024px) {
+            .main-container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .card {
+            background: var(--bg-secondary);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 1.5rem;
+            transition: transform 0.3s ease, border-color 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, transparent, var(--border-color), transparent);
+        }
+
+        .card:hover {
+            border-color: rgba(16, 185, 129, 0.2);
+        }
+
+        .card-title {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 1.1rem;
+            font-weight: 700;
+            margin-bottom: 1.25rem;
+            color: var(--text-primary);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        /* Controls Panel */
+        .controls-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        button {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 0.75rem 1rem;
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 700;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+
+        button:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: var(--text-secondary);
+        }
+
+        button.active {
+            background: var(--accent-neon);
+            color: #000;
+            border-color: var(--accent-neon);
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.3);
+        }
+
+        button.active:hover {
+            background: #059669;
+        }
+
+        button.danger {
+            background: rgba(239, 68, 68, 0.1);
+            border-color: rgba(239, 68, 68, 0.2);
+            color: var(--accent-alert);
+        }
+
+        button.danger:hover {
+            background: var(--accent-alert);
+            color: #fff;
+        }
+
+        /* Waveform visualization */
+        .visualizer-container {
+            position: relative;
+            width: 100%;
+            height: 160px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+            border: 1px solid rgba(255, 255, 255, 0.03);
+            overflow: hidden;
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Metrics grid */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        @media (max-width: 480px) {
+            .metrics-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .metric-card {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.03);
+            border-radius: 8px;
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .metric-label {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .metric-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            font-family: 'Space Grotesk', sans-serif;
+        }
+
+        .metric-value.pulse {
+            color: var(--accent-pulse);
+        }
+
+        .metric-value.neon {
+            color: var(--accent-neon);
+        }
+
+        /* Consumers list */
+        .consumer-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .consumer-item {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            border-radius: 10px;
+            padding: 0.75rem 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .consumer-info {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .consumer-name {
+            font-weight: 600;
+            font-size: 0.95rem;
+        }
+
+        .consumer-details {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+
+        .consumer-status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: var(--text-secondary);
+        }
+
+        .status-dot.active {
+            background-color: var(--accent-neon);
+            box-shadow: 0 0 8px var(--accent-neon);
+        }
+
+        .status-dot.warn {
+            background-color: #f59e0b;
+            box-shadow: 0 0 8px #f59e0b;
+        }
+
+        .status-dot.crashed {
+            background-color: var(--accent-alert);
+            box-shadow: 0 0 8px var(--accent-alert);
+        }
+
+        /* Transcription stream */
+        .transcription-container {
+            display: flex;
+            flex-direction: column;
+            height: 380px;
+        }
+
+        .transcripts-box {
+            flex-grow: 1;
+            background: rgba(0, 0, 0, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.03);
+            border-radius: 8px;
+            padding: 1rem;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            font-size: 0.95rem;
+        }
+
+        .transcript-line {
+            border-left: 2px solid var(--accent-pulse);
+            padding-left: 0.75rem;
+            color: #e5e7eb;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .vad-indicator {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .vad-light {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background-color: rgba(255, 255, 255, 0.1);
+            transition: all 0.3s ease;
+        }
+
+        .vad-light.active {
+            background-color: var(--accent-neon);
+            box-shadow: 0 0 12px var(--accent-neon);
+        }
+
+        .vad-text {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        .vad-light.active + .vad-text {
+            color: var(--accent-neon);
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Latency layout */
+        .percentiles-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-top: 0.5rem;
+        }
+
+        .percentile-item span {
+            font-family: 'Space Grotesk', sans-serif;
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        footer {
+            padding: 2rem;
+            text-align: center;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            border-top: 1px solid var(--border-color);
+            margin-top: auto;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Voice Ingestion Worker</h1>
+        <div class="status-badge" id="worker-status">Pipeline Idle</div>
+    </header>
+
+    <div class="main-container">
+        <!-- Left Column: Core pipeline stats, controls, waveform -->
+        <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+            <div class="card">
+                <div class="card-title">
+                    <span>Ingestion Control</span>
+                    <span id="active-source-badge" style="font-size: 0.8rem; color: var(--text-secondary); font-weight: normal;">No Active Source</span>
+                </div>
+                
+                <div class="controls-grid">
+                    <button id="btn-mic">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+                        Browser Mic
+                    </button>
+                    <button id="btn-replay">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                        Start File Replay
+                    </button>
+                    <button id="btn-slow" class="danger">
+                        Simulate Slow
+                    </button>
+                    <button id="btn-crash" class="danger">
+                        Simulate Crash
+                    </button>
+                </div>
+
+                <div class="visualizer-container">
+                    <canvas id="waveform-canvas"></canvas>
+                </div>
+
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <span class="metric-label">Ingested Samples</span>
+                        <span class="metric-value pulse" id="metric-samples">0</span>
+                    </div>
+                    <div class="metric-card">
+                        <span class="metric-label">Opus Frames Encoded</span>
+                        <span class="metric-value neon" id="metric-frames">0</span>
+                    </div>
+                </div>
+
+                <div class="metrics-grid">
+                    <div class="metric-card" style="grid-column: span 2;">
+                        <div class="metric-label" style="margin-bottom: 0.25rem;">E2E Pipeline Latency</div>
+                        <div class="percentiles-row">
+                            <div class="percentile-item">P50: <span id="lat-p50">0.0</span> ms</div>
+                            <div class="percentile-item">P95: <span id="lat-p95">0.0</span> ms</div>
+                            <div class="percentile-item">P99: <span id="lat-p99">0.0</span> ms</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">Network Observability (RTP / RED)</div>
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <span class="metric-label">Packets Received</span>
+                        <span class="metric-value" id="net-received">0</span>
+                    </div>
+                    <div class="metric-card">
+                        <span class="metric-label">Packets Lost (Gaps)</span>
+                        <span class="metric-value" id="net-lost" style="color: var(--accent-alert);">0</span>
+                    </div>
+                    <div class="metric-card">
+                        <span class="metric-label">RFC 3550 Jitter</span>
+                        <span class="metric-value" id="net-jitter">0.00 ms</span>
+                    </div>
+                    <div class="metric-card">
+                        <span class="metric-label">Recovered via RED</span>
+                        <span class="metric-value" id="net-dropped" style="color: var(--accent-neon);">0</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column: VAD transcription & Downstream consumers -->
+        <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+            <div class="card transcription-container">
+                <div class="card-title">Speech-To-Text Consumer</div>
+                <div class="transcripts-box" id="transcripts-box">
+                    <div style="color: var(--text-secondary); text-align: center; margin: auto;">Speak to transcribe or start replay...</div>
+                </div>
+                <div class="vad-indicator">
+                    <div class="vad-light" id="vad-light"></div>
+                    <span class="vad-text" id="vad-text">Silence</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">Downstream Consumers Registry</div>
+                <div class="consumer-list" id="consumer-list-container">
+                    <div class="consumer-item">
+                        <div class="consumer-info">
+                            <div class="consumer-name">speech-to-text</div>
+                            <div class="consumer-details">Queue: 0 / 100 | Dropped: 0</div>
+                        </div>
+                        <div class="consumer-status"><div class="status-dot active"></div></div>
+                    </div>
+                    <div class="consumer-item">
+                        <div class="consumer-info">
+                            <div class="consumer-name">recorder</div>
+                            <div class="consumer-details">Queue: 0 / 100 | Dropped: 0</div>
+                        </div>
+                        <div class="consumer-status"><div class="status-dot active"></div></div>
+                    </div>
+                    <div class="consumer-item">
+                        <div class="consumer-info">
+                            <div class="consumer-name">analytics</div>
+                            <div class="consumer-details">Queue: 0 / 100 | Dropped: 0</div>
+                        </div>
+                        <div class="consumer-status"><div class="status-dot active"></div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        Voice Ingestion Worker - Production Grade Audio Distribution Engine
+    </footer>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
