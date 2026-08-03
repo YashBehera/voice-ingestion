@@ -119,7 +119,7 @@ async function startMicrophone() {
         ws = new WebSocket(wsUrl);
         ws.binaryType = 'arraybuffer';
 
-        ws.onopen = () => {
+        ws.onopen = async () => {
             logStatus("WebSocket Connected");
             btnMic.classList.add('active');
             btnMic.disabled = false;
@@ -132,11 +132,15 @@ async function startMicrophone() {
             audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
             mediaStreamSource = audioContext.createMediaStreamSource(stream);
 
-            // ScriptProcessorNode size 2048, 1 input channel, 1 output channel
-            processorNode = audioContext.createScriptProcessor(2048, 1, 1);
+            // Load AudioWorklet module dynamically
+            await audioContext.audioWorklet.addModule('/static/pcm-processor.js');
+
+            // Instantiate AudioWorkletNode
+            processorNode = new AudioWorkletNode(audioContext, 'pcm-processor');
             
-            processorNode.onaudioprocess = (e) => {
-                const inputData = e.inputBuffer.getChannelData(0);
+            // Handle incoming audio frames from the worklet thread
+            processorNode.port.onmessage = (event) => {
+                const inputData = event.data;
                 
                 // Copy for local visualization canvas
                 audioBufferForVisualization.set(inputData.slice(0, 1024));
