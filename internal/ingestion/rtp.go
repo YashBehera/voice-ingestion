@@ -68,14 +68,23 @@ func (a *RTPAdapter) Start(ctx context.Context) error {
 	}
 	a.conn = conn
 
+	// Increase socket kernel read buffer to prevent OS packet drops under high traffic bursts
+	if err := conn.SetReadBuffer(4 * 1024 * 1024); err != nil { // 4MB buffer
+		log.Printf("Warning: failed to set UDP read buffer: %v", err)
+	}
+
 	a.ctx, a.cancel = context.WithCancel(ctx)
 	a.running = true
 	a.receiver.Reset()
 
-	a.wg.Add(1)
-	go a.readLoop()
+	// Spawn multiple concurrent reader workers to scale socket ingestion throughput
+	numWorkers := 4
+	for i := 0; i < numWorkers; i++ {
+		a.wg.Add(1)
+		go a.readLoop()
+	}
 
-	log.Printf("RTP/UDP Ingestion Adapter listening on udp://%s", a.address)
+	log.Printf("RTP/UDP Ingestion Adapter listening on udp://%s (4 workers)", a.address)
 	return nil
 }
 
