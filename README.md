@@ -6,6 +6,8 @@ This is a real-time media ingestion engine written in Go. It ingests audio from 
 
 ## Architecture Overview
 
+![Voice Ingestion Worker Architecture](static/IMG_3013.jpeg)
+
 ```mermaid
 graph TD
     subgraph Ingestion Layer
