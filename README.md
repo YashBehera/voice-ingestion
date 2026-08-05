@@ -66,7 +66,7 @@ sequenceDiagram
 
     UI->>WS: ① binary PCM, 16 kHz
     WS->>P: ② PushPCM(samples, 16000, "websocket")
-    P->>P: ③ resample to 48 kHz; collect 960 samples
+    P->>P: ③ resample to 48 kHz, collect 960 samples
     P->>O: ④ Encode(960 PCM samples)
     O-->>P: variable-length Opus payload
     P->>R: ⑤ Pack(Opus)
