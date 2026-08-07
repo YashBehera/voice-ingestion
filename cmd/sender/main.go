@@ -116,11 +116,9 @@ func main() {
 	totalSent := 0
 	totalDropped := 0
 
-	for {
-		select {
-		case <-ticker.C:
-			// Read one chunk
-			n, err := io.ReadFull(file, wavBuf)
+	for range ticker.C {
+		// Read one chunk
+		n, err := io.ReadFull(file, wavBuf)
 			if err != nil {
 				if err == io.EOF || err == io.ErrUnexpectedEOF {
 					log.Printf("Finished streaming WAV file. Sent: %d, Dropped: %d (Loss: %.1f%%)", 
@@ -191,7 +189,6 @@ func main() {
 			}
 			totalSent++
 		}
-	}
 }
 
 // makeRTPPacket creates a standard 12-byte RTP header and appends the payload.

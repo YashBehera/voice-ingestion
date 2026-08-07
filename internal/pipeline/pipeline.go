@@ -122,17 +122,17 @@ func (p *Pipeline) processChunk(chunk AudioChunk) {
 	defer p.mu.Unlock()
 
 	p.LastIngestTime = time.Now()
-	p.SamplesIngested += int64(len(chunk.PCM))
+	p.SamplesIngested += int64(len(chunk.PCM))//tracks how much audio has been processed
 
-	// 1. Resample to 48kHz mono PCM if necessary
-	resampled := ResampleMonoPCM(chunk.PCM, chunk.SampleRate, SampleRate)
+	// 1. Resample to 48kHz mono PCM using Polyphase FIR filtering
+	resampled := NewPolyphaseResampler(chunk.SampleRate, SampleRate).Resample(chunk.PCM)
 
 	// 2. Append to our PCM accumulator buffer
 	p.pcmBuf = append(p.pcmBuf, resampled...)
 
 	// 3. Process all complete 20ms frames in the buffer
-	for len(p.pcmBuf) >= FrameSamples {
-		frame := p.pcmBuf[:FrameSamples]
+	for len(p.pcmBuf) >= FrameSamples {//FrameSamples = 960 samples here
+		frame := p.pcmBuf[:FrameSamples]//slice exactly 960 samples
 
 		// Encode to Opus
 		opusData, err := p.encoder.Encode(frame)

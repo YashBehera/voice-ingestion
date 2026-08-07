@@ -16,9 +16,11 @@ import (
 	"time"
 
 	"voice-ingestion/internal/broker"
+	"voice-ingestion/internal/bus"
 	"voice-ingestion/internal/consumers"
 	"voice-ingestion/internal/ingestion"
 	"voice-ingestion/internal/pipeline"
+	"voice-ingestion/internal/router"
 )
 
 var (
@@ -98,8 +100,12 @@ func main() {
 	globalPipeline.Start()
 	defer globalPipeline.Stop()
 
-	// 7. Setup Ingestion Adapters
-	wsAdapter := ingestion.NewWebSocketAdapter(globalPipeline)
+	// 7. Setup Session Router & Ingestion Adapters
+	natsBus := bus.NewNATSBus()
+	sessionRouter := router.NewSessionRouter(*bitrate, *redDepth, natsBus)
+	defer sessionRouter.Close()
+
+	wsAdapter := ingestion.NewWebSocketAdapter(sessionRouter)
 	if err := wsAdapter.Start(ctx); err != nil {
 		log.Fatalf("Failed to start WS adapter: %v", err)
 	}

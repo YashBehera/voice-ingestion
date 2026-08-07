@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"sync"
 	"voice-ingestion/internal/pipeline"
+	"voice-ingestion/internal/router"
 
 	"github.com/gorilla/websocket"
 )
@@ -14,7 +15,7 @@ import (
 // WebSocketAdapter accepts PCM audio streaming over WebSocket connections.
 type WebSocketAdapter struct {
 	mu       sync.Mutex
-	pipeline *pipeline.Pipeline
+	router   *router.SessionRouter
 	upgrader websocket.Upgrader
 	ctx      context.Context
 	cancel   context.CancelFunc
@@ -22,9 +23,9 @@ type WebSocketAdapter struct {
 }
 
 // NewWebSocketAdapter creates a new WebSocket Ingestion Adapter.
-func NewWebSocketAdapter(p *pipeline.Pipeline) *WebSocketAdapter {
+func NewWebSocketAdapter(r *router.SessionRouter) *WebSocketAdapter {
 	return &WebSocketAdapter{
-		pipeline: p,
+		router: r,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				// Allow connection from any origin for the dashboard demo UI
@@ -122,8 +123,20 @@ func (a *WebSocketAdapter) Handler() http.HandlerFunc {
 					samples[i] = low | (high << 8)
 				}
 
-				// Push PCM to pipeline for resampling & encoding
-				a.pipeline.PushPCM(samples, sampleRate, a.ID())
+				// Extract session ID or default to "websocket"
+				sessionID := r.URL.Query().Get("session_id")
+				if sessionID == "" {
+					sessionID = a.ID()
+				}
+
+				chunk := pipeline.AudioChunk{
+					PCM:        samples,
+					SampleRate: sampleRate,
+					SourceID:   sessionID,
+				}
+
+				// Push chunk to session router for parallel processing
+				_ = a.router.RouteChunk(chunk)
 			}
 		}
 	}

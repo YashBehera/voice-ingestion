@@ -26,7 +26,6 @@ func ResampleMonoPCM(input []int16, inRate, outRate int) []int16 {
 		if high >= len(input) {
 			output[i] = input[low]
 		} else {
-			// Linear interpolation formula: val = input[low] * (1 - weight) + input[high] * weight
 			val := float64(input[low])*(1.0-weight) + float64(input[high])*weight
 			output[i] = int16(val)
 		}

@@ -8,6 +8,7 @@ import (
 	"net"
 	"sync"
 	"voice-ingestion/internal/pipeline"
+	"voice-ingestion/internal/rtcp"
 )
 
 // RTPAdapter binds to a UDP port and ingests real-time packetized audio (RTP).
@@ -18,6 +19,7 @@ type RTPAdapter struct {
 	pipeline   *pipeline.Pipeline
 	decoder    *pipeline.OpusDecoder
 	receiver   *pipeline.RedReceiver
+	rtcpEngine *rtcp.RTCPFeedbackEngine
 	conn       *net.UDPConn
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -34,12 +36,14 @@ func NewRTPAdapter(address string, p *pipeline.Pipeline) (*RTPAdapter, error) {
 
 	// RED Receiver with buffer capacity of 8 packets to support loss recovery
 	receiver := pipeline.NewRedReceiver(8)
+	rtcpEngine := rtcp.NewRTCPFeedbackEngine(0x12345678)
 
 	return &RTPAdapter{
-		address:  address,
-		pipeline: p,
-		decoder:  dec,
-		receiver: receiver,
+		address:    address,
+		pipeline:   p,
+		decoder:    dec,
+		receiver:   receiver,
+		rtcpEngine: rtcpEngine,
 	}, nil
 }
 

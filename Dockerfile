@@ -23,6 +23,9 @@ COPY . .
 # Build statically linked or dynamic (using libopus0) binaries
 RUN CGO_ENABLED=1 GOOS=linux go build -o /app/worker ./cmd/worker
 RUN CGO_ENABLED=1 GOOS=linux go build -o /app/sender ./cmd/sender
+RUN CGO_ENABLED=1 GOOS=linux go build -o /app/stt_service ./cmd/stt_service
+RUN CGO_ENABLED=1 GOOS=linux go build -o /app/recorder_service ./cmd/recorder_service
+RUN CGO_ENABLED=1 GOOS=linux go build -o /app/analytics_service ./cmd/analytics_service
 
 # Stage 2: Runtime image
 FROM debian:bookworm-slim
@@ -39,6 +42,9 @@ WORKDIR /app
 # Copy binaries from the builder
 COPY --from=builder /app/worker /app/worker
 COPY --from=builder /app/sender /app/sender
+COPY --from=builder /app/stt_service /app/stt_service
+COPY --from=builder /app/recorder_service /app/recorder_service
+COPY --from=builder /app/analytics_service /app/analytics_service
 COPY --from=builder /app/static /app/static
 
 # Create a recordings directory

@@ -9,47 +9,59 @@ This is a real-time media ingestion engine written in Go. It ingests audio from 
 ![Voice Ingestion Worker Architecture](static/IMG_3013.jpeg)
 
 ```mermaid
-graph TD
-    subgraph Ingestion Layer
-        WS[WebSocket Ingestion /ws/ingest]
-        RTP[RTP/UDP Ingestion :5004]
-        File[File Replay Ingestion]
-    end
+flowchart TD
 
-    subgraph Unified Media Pipeline
-        PCM_Queue[PCM Accumulator]
-        Resampler[Linear Resampler]
-        Opus_Enc[Opus Encoder]
-        RED_Packer[RFC2198 RED Packer]
-    end
+  subgraph Inputs["① Audio Inputs"]
+    MIC["Browser Microphone<br/>(WebSocket binary PCM)<br/>app.js"]
+    RTP["RTP / UDP Telephony Source<br/>(Port 5004)<br/>sender/main.go"]
+    WAV["WAV File Replay<br/>(Testing Loops)<br/>testdata/input.wav"]
+  end
 
-    subgraph Fan-Out Broker
-        Broker[Broker Dispatcher]
-        RingBuf1[Bounded Queue: STT]
-        RingBuf2[Bounded Queue: Recorder]
-        RingBuf3[Bounded Queue: Analytics]
-    end
+  subgraph Adapters["② Protocol Ingestion Layer"]
+    WS["WebSocket Adapter<br/>(Extracts Client PCM)<br/>ingestion/websocket.go"]
+    RA["RTP Adapter & Jitter Buffer<br/>(Dynamic Jitter Adjustment & RTCP Feedback)<br/>ingestion/rtp.go"]
+    FA["Replay Adapter<br/>(Stereo to Mono mixer)<br/>ingestion/replay.go"]
+  end
 
-    subgraph Downstream Consumers
-        STT[VAD & Simulated Speech-to-Text]
-        Rec[WAV File Recorder]
-        Analytics[Observability Logger]
-    end
+  MIC --> WS
+  RTP --> RA
+  WAV --> FA
 
-    WS -->|PCM/Raw| Resampler
-    RTP -->|RTP/PCM/Opus| Resampler
-    File -->|WAV/PCM| Resampler
-    Resampler --> PCM_Queue
-    PCM_Queue --> Opus_Enc
-    Opus_Enc --> RED_Packer
-    RED_Packer --> Broker
-    Broker -->|Non-blocking Push| RingBuf1
-    Broker -->|Non-blocking Push| RingBuf2
-    Broker -->|Non-blocking Push| RingBuf3
+  WS & RA & FA --> Router["③ Session ID Router<br/>(Load balances streams by Call ID)<br/>router/router.go"]
 
-    RingBuf1 --> STT
-    RingBuf2 --> Rec
-    RingBuf3 --> Analytics
+  subgraph Pool["④ Pipeline Worker Pool (Parallel Scaling)"]
+    direction TB
+    W1["Pipeline Worker (Call A)<br/>Polyphase FIR Resampler & Opus/RED<br/>pipeline/polyphase.go"]
+    W2["Pipeline Worker (Call B)<br/>Polyphase FIR Resampler & Opus/RED<br/>pipeline/encoder.go"]
+    W3["Pipeline Worker (Call C)<br/>Polyphase FIR Resampler & Opus/RED<br/>pipeline/red.go"]
+  end
+
+  Router -->|Stream Routing| W1
+  Router -->|Stream Routing| W2
+  Router -->|Stream Routing| W3
+
+  subgraph Broker["⑤ Distributed Message Bus (Clustered Fan-out)"]
+    NATS{"NATS JetStream / Kafka<br/>(Distributed Broadcast Topic)<br/>bus/nats.go"}
+  end
+
+  W1 & W2 & W3 -->|Publish RED packets| NATS
+
+  subgraph Consumers["⑥ Decoupled Microservices (Kubernetes Scaling)"]
+    STT["Speech-To-Text Service<br/>(Consumer Group A)<br/>stt_service/main.go"]
+    REC["WAV Recorder Archiver<br/>(Consumer Group B)<br/>recorder_service/main.go"]
+    MET["Analytics & Quality Monitor<br/>(Consumer Group C)<br/>analytics_service/main.go"]
+  end
+
+  NATS -->|NATS Subscription| STT
+  NATS -->|NATS Subscription| REC
+  NATS -->|NATS Subscription| MET
+
+  subgraph Feedback["⑦ Dynamic Jitter Loop"]
+    RTCP["RTCP Control Channel<br/>(Reports loss rate back to sender)<br/>rtcp/rtcp.go"]
+  end
+  
+  RA -.->|Calculate Network Loss| RTCP
+  RTCP -.->|Adjust Inbound RED Depth| RTP
 ```
 
 ### Ingestion Sequence Flow
