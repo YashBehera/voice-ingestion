@@ -85,8 +85,8 @@ func main() {
 		log.Fatalf("Failed to seek to data section: %v", err)
 	}
 
-	// 3. Initialize Opus Encoder
-	// We encode raw PCM into Opus packets
+	// 3. Creates the Opus encoder object in memory and 
+	// sets its target speed/quality to 24kbps (24,000 bits per second).
 	encoder, err := pipeline.NewOpusEncoder(24000) // 24kbps
 	if err != nil {
 		log.Fatalf("Failed to create Opus encoder: %v", err)

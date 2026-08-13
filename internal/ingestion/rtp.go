@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"log"
 	"net"
+	"os"
 	"sync"
+	"time"
 	"voice-ingestion/internal/pipeline"
 	"voice-ingestion/internal/rtcp"
 )
@@ -25,6 +28,12 @@ type RTPAdapter struct {
 	cancel     context.CancelFunc
 	wg         sync.WaitGroup
 	running    bool
+
+	// Added for dynamic WAV recording
+	wavFile     *os.File
+	lastPktTime time.Time
+	wavMutex    sync.Mutex
+	wavPath     string
 }
 
 // NewRTPAdapter creates a new RTP/UDP Ingestion Adapter.
@@ -52,7 +61,7 @@ func (a *RTPAdapter) ID() string {
 	return "rtp"
 }
 
-// Start begins listening on the UDP port.
+// Server starts/begins listening on the UDP port.
 func (a *RTPAdapter) Start(ctx context.Context) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -109,6 +118,7 @@ func (a *RTPAdapter) Stop() error {
 	a.mu.Unlock()
 
 	a.wg.Wait()
+	a.closeWavFile()
 	log.Println("RTP/UDP Ingestion Adapter stopped")
 	return nil
 }
@@ -204,6 +214,7 @@ func (a *RTPAdapter) processPacket(data []byte) {
 
 			// Push decoded PCM frames to pipeline (48kHz)
 			a.pipeline.PushPCM(pcm, pipeline.SampleRate, a.ID())
+			a.writePCMToWav(pcm, payloadType == 112)
 		}
 		return
 	}
@@ -235,4 +246,90 @@ func (a *RTPAdapter) processPacket(data []byte) {
 // GetReceiverMetrics returns the receiver packet statistics (received, lost, recovered)
 func (a *RTPAdapter) GetReceiverMetrics() (received, lost, recovered int64) {
 	return a.receiver.GetMetrics()
+}
+
+func (a *RTPAdapter) writePCMToWav(pcm []int16, hasRED bool) {
+	a.wavMutex.Lock()
+	defer a.wavMutex.Unlock()
+
+	now := time.Now()
+	// If 2 seconds of silence, close old file to start a fresh recording session
+	if a.wavFile != nil && now.Sub(a.lastPktTime) > 2*time.Second {
+		log.Printf("[RTP Recorder Debug] Idle timeout reached (%v). Closing current file: %s", now.Sub(a.lastPktTime), a.wavPath)
+		a.closeWavFileLocked()
+	}
+
+	a.lastPktTime = now
+
+	if a.wavFile == nil {
+		path := "recordings/scenario_b_with_red.wav"
+		if !hasRED {
+			path = "recordings/scenario_a_no_red.wav"
+		}
+		a.wavPath = path
+
+		_ = os.MkdirAll("recordings", 0755)
+		f, err := os.Create(path)
+		if err != nil {
+			log.Printf("Failed to create WAV recording %s: %v", path, err)
+			return
+		}
+		a.wavFile = f
+
+		// Write 44-byte WAV header template
+		header := make([]byte, 44)
+		copy(header[0:4], []byte("RIFF"))
+		copy(header[8:12], []byte("WAVE"))
+		copy(header[12:16], []byte("fmt "))
+		binary.LittleEndian.PutUint32(header[16:20], 16)
+		binary.LittleEndian.PutUint16(header[20:22], 1)
+		binary.LittleEndian.PutUint16(header[22:24], 1)
+		binary.LittleEndian.PutUint32(header[24:28], 48000)
+		binary.LittleEndian.PutUint32(header[28:32], 96000)
+		binary.LittleEndian.PutUint16(header[32:34], 2)
+		binary.LittleEndian.PutUint16(header[34:36], 16)
+		copy(header[36:40], []byte("data"))
+		_, _ = f.Write(header)
+		log.Printf("[RTP Recorder] Started recording to %s (hasRED=%t)", path, hasRED)
+	}
+
+	byteBuf := make([]byte, len(pcm)*2)
+	for i, val := range pcm {
+		binary.LittleEndian.PutUint16(byteBuf[i*2:], uint16(val))
+	}
+	_, err := a.wavFile.Write(byteBuf)
+	if err != nil {
+		log.Printf("[RTP Recorder Error] Failed to write PCM chunk: %v", err)
+	}
+}
+
+func (a *RTPAdapter) closeWavFile() {
+	a.wavMutex.Lock()
+	defer a.wavMutex.Unlock()
+	a.closeWavFileLocked()
+}
+
+func (a *RTPAdapter) closeWavFileLocked() {
+	if a.wavFile == nil {
+		return
+	}
+	fInfo, err := a.wavFile.Stat()
+	sz := int64(0)
+	if err == nil {
+		sz = fInfo.Size()
+		dataSz := sz - 44
+		riffSz := sz - 8
+
+		_, _ = a.wavFile.Seek(4, io.SeekStart)
+		buf := make([]byte, 4)
+		binary.LittleEndian.PutUint32(buf, uint32(riffSz))
+		_, _ = a.wavFile.Write(buf)
+
+		_, _ = a.wavFile.Seek(40, io.SeekStart)
+		binary.LittleEndian.PutUint32(buf, uint32(dataSz))
+		_, _ = a.wavFile.Write(buf)
+	}
+	_ = a.wavFile.Close()
+	a.wavFile = nil
+	log.Printf("[RTP Recorder] Finished recording and saved %s (final size: %d bytes)", a.wavPath, sz)
 }

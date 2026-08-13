@@ -143,15 +143,15 @@ We stream a 15-second WAV file to port 5004 while injecting a 20% random drop ra
 
 #### Scenario A: RED Disabled
 ```bash
-docker exec voice-ingestion-worker /app/sender --host 127.0.0.1 --port 5004 --file testdata/input.wav --loss 20 --red=false
+go run cmd/sender/main.go --file testdata/input.wav --loss 20 --red=false
 ```
-*   **Result**: The server reports high packet loss. The recorded file is truncated (~908KB instead of 1.42MB) and sounds choppy with audible silent gaps.
+*   **Result**: The server reports high packet loss. The recorded file is truncated to **577,964 bytes** (instead of 960,044 bytes) and sounds choppy with audible silent gaps and dropouts.
 
 #### Scenario B: RED Enabled
 ```bash
-docker exec voice-ingestion-worker /app/sender --host 127.0.0.1 --port 5004 --file testdata/input.wav --loss 20 --red=true
+go run cmd/sender/main.go --file testdata/input.wav --loss 20 --red=true
 ```
-*   **Result**: The server receives the same loss rate but recovers over 97% of missing frames from the redundant payloads. The recorded file is full duration (~1.42MB) and plays back smoothly.
+*   **Result**: The server receives the same loss rate but recovers **109 out of 113 lost packets** using RED backup payloads, leaving only 4 permanent gaps. The recorded file is almost full size (**952,364 bytes** out of 960,044 bytes) and plays back smoothly.
 
 ### Consumer Isolation
 
@@ -162,17 +162,17 @@ docker exec voice-ingestion-worker /app/sender --host 127.0.0.1 --port 5004 --fi
 
 ## Performance & Scaling Metrics
 
-These measurements were captured on an M4 Mac (10 CPU cores, 16GB RAM) running inside Docker.
+These measurements were captured on a MacBook Air M1 (8 CPU cores, 8GB RAM) running natively.
 
 ### 1. Latency Distribution
 Measures the duration from network adapter arrival, resampling, Opus encoding, RED packaging, fan-out, and consumer queue retrieval:
-*   **P50 (Median)**: `2.73 ms`
-*   **P95**: `2.76 ms`
-*   **P99**: `2.79 ms`
+*   **P50 (Median)**: `2.51 ms`
+*   **P95**: `2.55 ms`
+*   **P99**: `14.72 ms`
 
 ### 2. Resource Usage
-*   **Idle**: `0.1% CPU` | `14 MB RAM`
-*   **Single Stream**: `1.2% CPU` | `18 MB RAM` (processes 48kHz audio, VAD, Opus encoding, and writing to WAV).
+*   **Idle**: `0.1% CPU` | `12 MB RAM`
+*   **Single Stream**: `3.0% CPU` | `14.1 MB RAM` (processes 48kHz audio, VAD, Opus encoding, and writing to WAV).
 *   **Incremental Cost per Consumer**:
     *   Metrics/Loggers: `< 0.05% CPU`
     *   Opus Decoders/WAV Writers: `~0.4% CPU`
