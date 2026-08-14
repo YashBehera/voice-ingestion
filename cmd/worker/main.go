@@ -218,6 +218,13 @@ func ensureTestWav() {
 
 // HTTP API Handlers
 
+type ConsumerInfo struct {
+	ID      string `json:"ID"`
+	Len     int    `json:"Len"`
+	Cap     int    `json:"Cap"`
+	Dropped int64  `json:"Dropped"`
+}
+
 type StatusResponse struct {
 	Pipeline struct {
 		SamplesIngested int64  `json:"samples_ingested"`
@@ -238,6 +245,12 @@ type StatusResponse struct {
 		MessagesPublished int64 `json:"messages_published"`
 		BytesPublished    int64 `json:"bytes_published"`
 	} `json:"nats_bus"`
+	Speech struct {
+		SpeechDetected bool     `json:"speech_detected"`
+		CurrentRms     float64  `json:"current_rms"`
+		Transcripts    []string `json:"transcripts"`
+	} `json:"speech"`
+	Consumers []ConsumerInfo `json:"consumers"`
 }
 
 func handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -297,6 +310,39 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 		res.NATSBus.MessagesPublished = msgs
 		res.NATSBus.BytesPublished = bytes
 	}
+
+	var consumersList []ConsumerInfo
+	consumersList = append(consumersList, ConsumerInfo{
+		ID:      "speech-to-text",
+		Len:     0,
+		Cap:     100,
+		Dropped: 0,
+	})
+	consumersList = append(consumersList, ConsumerInfo{
+		ID:      "recorder",
+		Len:     0,
+		Cap:     100,
+		Dropped: 0,
+	})
+	consumersList = append(consumersList, ConsumerInfo{
+		ID:      "analytics",
+		Len:     0,
+		Cap:     100,
+		Dropped: 0,
+	})
+
+	slowMutex.Lock()
+	if slowCancel != nil && slowQueue != nil {
+		consumersList = append(consumersList, ConsumerInfo{
+			ID:      "slow-consumer",
+			Len:     len(slowQueue),
+			Cap:     slowQueueLimit,
+			Dropped: atomic.LoadInt64(&slowDropped),
+		})
+	}
+	slowMutex.Unlock()
+
+	res.Consumers = consumersList
 
 	_ = json.NewEncoder(w).Encode(res)
 }
@@ -477,8 +523,11 @@ func closeLocalRecorder() {
 }
 
 var (
-	slowCancel context.CancelFunc
-	slowMutex  sync.Mutex
+	slowCancel     context.CancelFunc
+	slowMutex      sync.Mutex
+	slowQueue      chan bus.Message
+	slowDropped    int64
+	slowQueueLimit = 100
 )
 
 func handleSlowStart(w http.ResponseWriter, r *http.Request) {
@@ -496,16 +545,47 @@ func handleSlowStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	slowQueue = make(chan bus.Message, slowQueueLimit)
+	atomic.StoreInt64(&slowDropped, 0)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	slowCancel = cancel
+
+	// Spawn the slow worker reader loop
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg := <-slowQueue:
+				// Lag by 100ms per frame to trigger drops
+				time.Sleep(100 * time.Millisecond)
+				_ = msg
+			}
+		}
+	}()
 
 	err := natsBus.Subscribe("media.session.*", "slow-group", func(msg bus.Message) error {
 		select {
 		case <-ctx.Done():
 			return nil
 		default:
-			// Lag by 100ms to trigger buffer drops
-			time.Sleep(100 * time.Millisecond)
+			// Bounded drop-oldest enqueue policy
+			select {
+			case slowQueue <- msg:
+			default:
+				// Queue is full! Drop oldest frame
+				select {
+				case <-slowQueue:
+					atomic.AddInt64(&slowDropped, 1)
+				default:
+				}
+				// Retry push
+				select {
+				case slowQueue <- msg:
+				default:
+				}
+			}
 			return nil
 		}
 	})
@@ -513,6 +593,7 @@ func handleSlowStart(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		cancel()
 		slowCancel = nil
+		slowQueue = nil
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{"status": "error", "message": err.Error()})
 		return
 	}
@@ -534,6 +615,7 @@ func handleSlowStop(w http.ResponseWriter, r *http.Request) {
 	if slowCancel != nil {
 		slowCancel()
 		slowCancel = nil
+		slowQueue = nil
 		log.Println("[Slow Consumer Simulation] Stopped slow consumer NATS subscription")
 	}
 

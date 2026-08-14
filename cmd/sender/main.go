@@ -100,6 +100,32 @@ func main() {
 	packer := pipeline.NewRedPacker(depth)
 	packer.Reset()
 
+	// Spawn background listener to receive RTCP Receiver Reports and adjust RED depth dynamically
+	go func() {
+		rtcpBuf := make([]byte, 1024)
+		for {
+			n, err := conn.Read(rtcpBuf)
+			if err != nil {
+				return // socket closed
+			}
+			if n >= 21 {
+				ssrc := binary.BigEndian.Uint32(rtcpBuf[0:4])
+				fracLost := rtcpBuf[4]
+				_ = binary.BigEndian.Uint32(rtcpBuf[5:9])    // TotalLost (unused locally but parsed)
+				_ = binary.BigEndian.Uint32(rtcpBuf[9:13])   // HighestSeq (unused locally but parsed)
+				jitter := binary.BigEndian.Uint32(rtcpBuf[13:17])
+				recommended := int(binary.BigEndian.Uint32(rtcpBuf[17:21]))
+
+				log.Printf("[RTCP Feedback] SSRC: %x | Loss Rate: %.1f%% | Jitter: %d | Recommended RED Depth: %d", 
+					ssrc, float64(fracLost)/256.0*100.0, jitter, recommended)
+
+				if *useRed {
+					packer.SetDepth(recommended)
+				}
+			}
+		}
+	}()
+
 	// We need to read 20ms chunks of WAV audio, resample to 48kHz, and encode
 	// For 20ms:
 	samplesPerChunk := (sampleRate * 20) / 1000

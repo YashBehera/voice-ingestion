@@ -54,5 +54,8 @@ This log documents the core technical decisions made during the design and imple
 *   **Decision**: Call `conn.SetReadBuffer(4 * 1024 * 1024)` on the UDP connection immediately after binding.
 *   **Why**: By default, operating systems allocate very small socket buffers (often 64KB to 256KB) for UDP ports. If there is a massive burst of incoming calls and the Go application experiences a tiny scheduling delay or Garbage Collection pause, this small buffer overflows in microseconds, causing the OS kernel to silently drop packets. Setting a 4MB buffer acts as a giant waiting room in RAM that can hold over 28,000 packets, ensuring no voice data is dropped at the OS boundary.
 
-			log.Printf("Type of wavBuf in RAM: %v", reflect.TypeOf(wavBuf))
-			log.Printf("Type of pcm in RAM: %v", reflect.TypeOf(pcm))
+### Q13: Why do we resample and encode on the UDP client (sender/main.go) but stream raw PCM on the WebSocket client (app.js)?
+*   **Decision**: Client-side resample/encode for UDP streams, server-side resample/encode for TCP/WebSocket streams.
+*   **Why**: 
+    1.  **Network Protocol Guarantees**: UDP is unreliable and subject to packet loss, so the client must compress the audio to Opus to fit MTU limits and wrap it in RED redundancy to heal drops. WebSockets run on TCP, which guarantees 100% reliable, in-order packet delivery at the OS kernel layer, making client-side RED or custom packetization completely unnecessary.
+    2.  **Browser Sandbox Limitations**: Browsers do not have native JS APIs to pack RED redundancy or compile manual RTP packets. Implementing it in `app.js` would require running a heavy WebAssembly (WASM) Opus build, which increases webpage load sizes and drains client CPU/battery. Offloading normalization to the server keeps the web client lightweight and performant.

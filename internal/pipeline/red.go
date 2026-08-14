@@ -38,6 +38,16 @@ func NewRedPacker(depth int) *RedPacker {
 	}
 }
 
+// SetDepth dynamically updates the redundancy depth.
+func (p *RedPacker) SetDepth(depth int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.depth = depth
+	if len(p.history) > depth {
+		p.history = p.history[len(p.history)-depth:]
+	}
+}
+
 // Pack encodes a raw Opus payload into an RFC2198 RED packet, updating history.
 func (p *RedPacker) Pack(opusPayload []byte) MediaPacket {
 	p.mu.Lock()

@@ -73,7 +73,7 @@ sequenceDiagram
     participant P as pipeline.go
     participant O as encoder.go
     participant R as red.go
-    participant B as broker.go
+    participant B as nats.go (TCP Broker)
     participant C as consumers
 
     UI->>WS: ① binary PCM, 16 kHz
@@ -83,8 +83,8 @@ sequenceDiagram
     O-->>P: variable-length Opus payload
     P->>R: ⑤ Pack(Opus)
     R-->>P: RED MediaPacket
-    P->>B: ⑥ Publish(packet)
-    B->>C: ⑦ one isolated queue per consumer
+    P->>B: ⑥ Publish via TCP NATS Broker
+    B->>C: ⑦ Load-balanced TCP subscriptions
     C-->>C: ⑧ VAD, WAV recording, analytics 
 ```
 

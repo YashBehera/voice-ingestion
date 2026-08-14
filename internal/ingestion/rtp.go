@@ -34,6 +34,10 @@ type RTPAdapter struct {
 	lastPktTime time.Time
 	wavMutex    sync.Mutex
 	wavPath     string
+
+	// TCP/UDP Address of client for RTCP feedback loop
+	clientAddr  net.Addr
+	clientMutex sync.Mutex
 }
 
 // NewRTPAdapter creates a new RTP/UDP Ingestion Adapter.
@@ -128,10 +132,14 @@ func (a *RTPAdapter) readLoop() {
 	buf := make([]byte, 2048)
 
 	for {
-		n, _, err := a.conn.ReadFrom(buf)
+		n, srcAddr, err := a.conn.ReadFrom(buf)
 		if err != nil {
 			return
 		}
+
+		a.clientMutex.Lock()
+		a.clientAddr = srcAddr
+		a.clientMutex.Unlock()
 
 		select {
 		case <-a.ctx.Done():
@@ -184,6 +192,14 @@ func (a *RTPAdapter) processPacket(data []byte) {
 
 	// Handle RTP/Opus (111) or RTP/RED (112) using our RedReceiver buffer
 	if payloadType == 111 || payloadType == 112 {
+		// Record arrival in RTCP Engine
+		a.rtcpEngine.RecordArrival(seq, timestamp)
+
+		// Trigger RTCP feedback report every 50 packets (~1 second of audio)
+		if seq%50 == 0 {
+			a.sendRTCPReport()
+		}
+
 		a.receiver.Push(pipeline.MediaPacket{
 			SequenceNumber: seq,
 			Timestamp:      timestamp,
@@ -204,6 +220,7 @@ func (a *RTPAdapter) processPacket(data []byte) {
 			if skipped {
 				// Packet lost: trigger Packet Loss Concealment (PLC)
 				pcm, err = a.decoder.DecodeLost()
+				a.rtcpEngine.RecordLoss()
 			} else {
 				pcm, err = a.decoder.Decode(pkt.Payload)
 			}
@@ -332,4 +349,27 @@ func (a *RTPAdapter) closeWavFileLocked() {
 	_ = a.wavFile.Close()
 	a.wavFile = nil
 	log.Printf("[RTP Recorder] Finished recording and saved %s (final size: %d bytes)", a.wavPath, sz)
+}
+
+func (a *RTPAdapter) sendRTCPReport() {
+	a.clientMutex.Lock()
+	addr := a.clientAddr
+	a.clientMutex.Unlock()
+
+	if addr == nil {
+		return
+	}
+
+	report := a.rtcpEngine.GenerateReport()
+
+	// Serialize Receiver Report to 24-byte binary block
+	buf := make([]byte, 24)
+	binary.BigEndian.PutUint32(buf[0:4], report.SSRC)
+	buf[4] = report.FractionLost
+	binary.BigEndian.PutUint32(buf[5:9], report.TotalLost)
+	binary.BigEndian.PutUint32(buf[9:13], report.HighestSeq)
+	binary.BigEndian.PutUint32(buf[13:17], report.Jitter)
+	binary.BigEndian.PutUint32(buf[17:21], uint32(report.RecommendedRED))
+
+	_, _ = a.conn.WriteTo(buf, addr)
 }
