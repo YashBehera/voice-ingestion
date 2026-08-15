@@ -223,6 +223,7 @@ type ConsumerInfo struct {
 	Len     int    `json:"Len"`
 	Cap     int    `json:"Cap"`
 	Dropped int64  `json:"Dropped"`
+	Active  bool   `json:"Active"`
 }
 
 type StatusResponse struct {
@@ -312,24 +313,31 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var consumersList []ConsumerInfo
-	consumersList = append(consumersList, ConsumerInfo{
-		ID:      "speech-to-text",
-		Len:     0,
-		Cap:     100,
-		Dropped: 0,
-	})
-	consumersList = append(consumersList, ConsumerInfo{
-		ID:      "recorder",
-		Len:     0,
-		Cap:     100,
-		Dropped: 0,
-	})
-	consumersList = append(consumersList, ConsumerInfo{
-		ID:      "analytics",
-		Len:     0,
-		Cap:     100,
-		Dropped: 0,
-	})
+	var statsMap map[string]bus.ConsumerStats
+	if natsBus != nil {
+		statsMap = natsBus.GetConsumerStats()
+	}
+	for _, id := range []string{"speech-to-text", "recorder", "analytics"} {
+		lenVal := 0
+		capVal := 100
+		dropVal := int64(0)
+		active := false
+		if statsMap != nil {
+			if s, ok := statsMap[id]; ok {
+				lenVal = s.Len
+				capVal = s.Cap
+				dropVal = s.Dropped
+				active = true
+			}
+		}
+		consumersList = append(consumersList, ConsumerInfo{
+			ID:      id,
+			Len:     lenVal,
+			Cap:     capVal,
+			Dropped: dropVal,
+			Active:  active,
+		})
+	}
 
 	slowMutex.Lock()
 	if slowCancel != nil && slowQueue != nil {

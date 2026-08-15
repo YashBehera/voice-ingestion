@@ -2,6 +2,7 @@ package bus
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -11,13 +12,19 @@ import (
 	"sync/atomic"
 	"time"
 )
-
-
-
 type subscription struct {
 	topic   string
 	group   string
 	handler HandlerFunc
+}
+
+// ConsumerStats holds the metrics reported by microservices
+type ConsumerStats struct {
+	ID        string    `json:"id"`
+	Len       int       `json:"len"`
+	Cap       int       `json:"cap"`
+	Dropped   int64     `json:"dropped"`
+	Timestamp time.Time `json:"-"`
 }
 
 // Global thread-safe mutex registry to serialize TCP socket writes and prevent frame interleaving corruption
@@ -36,14 +43,19 @@ type NATSBus struct {
 	listener net.Listener
 	clients  []net.Conn
 	conn     net.Conn // client connection
+
+	// Distributed consumer telemetry tracking
+	statsMutex sync.Mutex
+	statsMap   map[string]ConsumerStats
 }
 
 // NewNATSBus initializes a networked TCP broker on port 4222, falling back to client mode.
 func NewNATSBus() *NATSBus {
 	b := &NATSBus{
-		subs:    make([]*subscription, 0),
-		groupRR: make(map[string]*uint64),
-		clients: make([]net.Conn, 0),
+		subs:     make([]*subscription, 0),
+		groupRR:  make(map[string]*uint64),
+		clients:  make([]net.Conn, 0),
+		statsMap: make(map[string]ConsumerStats),
 	}
 
 	// Try to start TCP Server on NATS default port (4222)
@@ -52,6 +64,22 @@ func NewNATSBus() *NATSBus {
 		b.listener = l
 		go b.runServer()
 		log.Println("[NATS TCP Broker] Running embedded central TCP server on 127.0.0.1:4222")
+
+		// Register stats collector subscriber internally on the server broker
+		_ = b.Subscribe("media.metrics.*", "stats-collector", func(msg Message) error {
+			log.Printf("[NATS Debug] Received metrics packet: Topic=%s Payload=%s", msg.Topic, string(msg.Payload))
+			var stats ConsumerStats
+			if err := json.Unmarshal(msg.Payload, &stats); err == nil {
+				log.Printf("[NATS Debug] Successfully parsed stats: %+v", stats)
+				stats.Timestamp = time.Now()
+				b.statsMutex.Lock()
+				b.statsMap[stats.ID] = stats
+				b.statsMutex.Unlock()
+			} else {
+				log.Printf("[NATS Debug] Unmarshal error: %v", err)
+			}
+			return nil
+		})
 	} else {
 		// Port already in use, try to connect to the running server as a client
 		conn, err := net.DialTimeout("tcp", "127.0.0.1:4222", 1*time.Second)
@@ -96,14 +124,14 @@ func (b *NATSBus) Publish(topic string, payload []byte) error {
 		return fmt.Errorf("bus is closed")
 	}
 
-	atomic.AddInt64(&b.msgCount, 1)
-	atomic.AddInt64(&b.bytesCount, int64(len(payload)))
-
 	// If we are a client process, write the published frame up to the central broker
 	if b.conn != nil {
 		b.mu.Unlock()
 		return b.sendTCPFrame(b.conn, topic, payload)
 	}
+
+	atomic.AddInt64(&b.msgCount, 1)
+	atomic.AddInt64(&b.bytesCount, int64(len(payload)))
 
 	// Dispatch to NATS subscribers (this includes remote clients registered in b.subs!)
 	b.dispatchLocal(topic, payload)
@@ -134,6 +162,20 @@ func (b *NATSBus) Subscribe(topic string, group string, handler HandlerFunc) err
 	}
 
 	return nil
+}
+
+func (b *NATSBus) GetConsumerStats() map[string]ConsumerStats {
+	b.statsMutex.Lock()
+	defer b.statsMutex.Unlock()
+	log.Printf("[NATS Debug] GetConsumerStats called. statsMap size: %d", len(b.statsMap))
+	m := make(map[string]ConsumerStats)
+	for k, v := range b.statsMap {
+		log.Printf("[NATS Debug] Map entry: key=%s value=%+v age=%v", k, v, time.Since(v.Timestamp))
+		if time.Since(v.Timestamp) < 2*time.Second {
+			m[k] = v
+		}
+	}
+	return m
 }
 
 func (b *NATSBus) sendTCPFrame(conn net.Conn, topic string, payload []byte) error {
@@ -270,6 +312,8 @@ func (b *NATSBus) handleServerClient(conn net.Conn) {
 
 		// Re-broadcast incoming published message to all subscribers
 		b.mu.Lock()
+		atomic.AddInt64(&b.msgCount, 1)
+		atomic.AddInt64(&b.bytesCount, int64(len(payload)))
 		b.dispatchLocal(topic, payload)
 		b.mu.Unlock()
 	}
@@ -319,6 +363,8 @@ func (b *NATSBus) runClient() {
 		}
 
 		b.mu.Lock()
+		atomic.AddInt64(&b.msgCount, 1)
+		atomic.AddInt64(&b.bytesCount, int64(len(payload)))
 		b.dispatchLocal(topic, payload)
 		b.mu.Unlock()
 	}

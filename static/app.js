@@ -333,19 +333,21 @@ async function pollStats() {
                 const item = document.createElement('div');
                 item.className = 'consumer-item';
                 
-                let dotClass = 'active';
+                let dotClass = '';
+                if (c.Active) {
+                    dotClass = 'active';
+                }
                 if (c.ID === 'slow-consumer') {
                     dotClass = 'warn';
                 }
                 if (c.ID === 'crashy-consumer') {
-                    // Check if crashed (if we triggered crash and it's not active anymore)
                     dotClass = 'active';
                 }
 
                 item.innerHTML = `
                     <div class="consumer-info">
                         <div class="consumer-name">${c.ID}</div>
-                        <div class="consumer-details">Queue: ${c.Len} / ${c.Cap} | Dropped: ${c.Dropped}</div>
+                        <div class="consumer-details">${c.Active || c.ID === 'slow-consumer' ? `Queue: ${c.Len} / ${c.Cap} | Dropped: ${c.Dropped}` : 'Offline'}</div>
                     </div>
                     <div class="consumer-status"><div class="status-dot ${dotClass}"></div></div>
                 `;

@@ -59,3 +59,9 @@ This log documents the core technical decisions made during the design and imple
 *   **Why**: 
     1.  **Network Protocol Guarantees**: UDP is unreliable and subject to packet loss, so the client must compress the audio to Opus to fit MTU limits and wrap it in RED redundancy to heal drops. WebSockets run on TCP, which guarantees 100% reliable, in-order packet delivery at the OS kernel layer, making client-side RED or custom packetization completely unnecessary.
     2.  **Browser Sandbox Limitations**: Browsers do not have native JS APIs to pack RED redundancy or compile manual RTP packets. Implementing it in `app.js` would require running a heavy WebAssembly (WASM) Opus build, which increases webpage load sizes and drains client CPU/battery. Offloading normalization to the server keeps the web client lightweight and performant.
+
+### Q14: Why does the pipeline accumulate audio samples in `pcmBuf` instead of encoding them immediately as they arrive?
+*   **Decision**: Collect samples in an accumulator buffer (`pcmBuf`) and only slice out exact 960-sample (20ms) frames for the Opus encoder.
+*   **Why**: 
+    1.  **Inconsistent Ingestion Chunk Sizes**: Web browsers and UDP networks do not guarantee that audio packets arrive in neat 20ms chunks. Depending on browser context switches, OS thread scheduling, or network jitter, chunks of varying sizes (e.g. 10ms, 30ms, 15ms) arrive. The Opus encoder is extremely strict—it only accepts specific, fixed frame sizes (exactly 960 samples for 20ms at 48kHz). If we fed arbitrary sizes, it would crash or error out.
+    2.  **Preserving Leftovers (Zero Gaps)**: If an incoming resampled chunk contains 1,200 samples, we encode the first 960 samples. The remaining 240 samples must be saved in `pcmBuf` to be combined with the next chunk. Throwing them away would introduce audible clicks, pops, and structural audio gaps in the output stream. Accumulating ensures a continuous, phase-coherent audio output.

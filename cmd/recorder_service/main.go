@@ -2,12 +2,15 @@ package main
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"flag"
 	"io"
 	"log"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
+	"time"
 	"voice-ingestion/internal/bus"
 	"voice-ingestion/internal/pipeline"
 )
@@ -50,8 +53,37 @@ func main() {
 		log.Fatalf("Failed to create Opus decoder: %v", err)
 	}
 
+	var processingCount int64
+	var droppedCount int64
+	maxConcurrent := int64(8)
+
 	eventBus := bus.NewNATSBus()
+
+	// Broadcast active queue stats back to worker telemetry hub
+	go func() {
+		ticker := time.NewTicker(200 * time.Millisecond)
+		for range ticker.C {
+			stats := bus.ConsumerStats{
+				ID:      "recorder",
+				Len:     int(atomic.LoadInt64(&processingCount)),
+				Cap:     int(maxConcurrent),
+				Dropped: atomic.LoadInt64(&droppedCount),
+			}
+			payload, _ := json.Marshal(stats)
+			_ = eventBus.Publish("media.metrics.recorder", payload)
+		}
+	}()
+
 	err = eventBus.Subscribe(*topic, *group, func(msg bus.Message) error {
+		// Backpressure load-shedding check
+		if atomic.LoadInt64(&processingCount) >= maxConcurrent {
+			atomic.AddInt64(&droppedCount, 1)
+			return nil
+		}
+
+		atomic.AddInt64(&processingCount, 1)
+		defer atomic.AddInt64(&processingCount, -1)
+
 		if len(msg.Payload) < 2 {
 			return nil
 		}
@@ -86,6 +118,9 @@ func main() {
 			binary.LittleEndian.PutUint16(byteBuf[i*2:], uint16(val))
 		}
 		_, _ = f.Write(byteBuf)
+
+		// Simulate disk write duration / buffering delay
+		time.Sleep(30 * time.Millisecond)
 
 		return nil
 	})
