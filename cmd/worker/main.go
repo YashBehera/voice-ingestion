@@ -65,7 +65,11 @@ func main() {
 	ensureTestWav()
 
 	// 2. Setup NATS EventBus & Session Router
-	natsBus = bus.NewNATSBus()
+	var err error
+	natsBus, err = bus.NewNATSBus()
+	if err != nil {
+		log.Fatalf("Failed to connect to NATS: %v", err)
+	}
 	defer natsBus.Close()
 	defer closeLocalRecorder()
 
@@ -76,7 +80,6 @@ func main() {
 	startLocalRecorder(natsBus)
 
 	// 3. Setup Media Pipeline (RED + Opus)
-	var err error
 	globalPipeline, err = pipeline.NewPipeline(*bitrate, *redDepth, &natsPublisher{bus: natsBus})
 	if err != nil {
 		log.Fatalf("Failed to initialize pipeline: %v", err)

@@ -356,16 +356,18 @@ func (r *RedReceiver) PopNext(force bool) (MediaPacket, bool, bool) {
 		}
 
 		if found {
-			// We skipped some packets!
-			skippedCount := oldestSeq - r.nextSeq
-			r.PacketsLost += int64(skippedCount)
-			r.nextSeq = oldestSeq
-
-			// Now pop the oldest available packet
-			pkt := r.buffer[oldestSeq]
-			delete(r.buffer, oldestSeq)
+			// We have a gap between r.nextSeq and oldestSeq.
+			// Instead of jumping directly to oldestSeq and returning it,
+			// we return a skipped/lost indicator for r.nextSeq (the missing packet)
+			// and increment r.nextSeq by 1.
+			// This allows the caller to receive a skipped packet notification
+			// for EACH individual lost packet in the gap, and ensures that the
+			// actual valid packet at oldestSeq remains in the buffer to be popped
+			// normally on a subsequent call.
+			lostSeq := r.nextSeq
+			r.PacketsLost++
 			r.nextSeq++
-			return pkt, true, true // true for skipped/lost packet
+			return MediaPacket{SequenceNumber: lostSeq, PayloadType: 111}, true, true
 		}
 	}
 

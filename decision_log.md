@@ -24,9 +24,9 @@ This log documents the core technical decisions made during the design and imple
 *   **Decision**: Standardize all input formats to 48kHz mono PCM before processing.
 *   **Why**: Inputs come in at various formats (16kHz from browser mic, 8kHz from VoIP, stereo from files). Normalizing to 48kHz mono PCM simplifies digital signal processing (DSP), aligns with the native sample rate of the Opus encoder, and ensures downstream microservices only have to support one clean audio format.
 
-### Q6: Why did we transition from a local in-memory broker to NATS JetStream?
-*   **Decision**: Broadcast encoded audio packets to NATS JetStream topics.
-*   **Why**: An in-memory broker is a single point of failure; if the server restarts, all live recording data is lost. NATS JetStream stores streams on disk, load-balances traffic across multiple worker pods, and lets us add new features (like live translation) with zero downtime and zero changes to the core ingestion server.
+### Q6: Why did we transition from a local in-memory broker to official NATS?
+*   **Decision**: Publish encoded audio packets through an external NATS server using the official Go client.
+*   **Why**: A local in-process broker cannot connect separately deployed services. NATS provides supported networked publish/subscribe and queue groups, so recorder, STT, and analytics processes can be scaled independently. The current integration uses Core NATS; JetStream persistence can be added later if durable replay is required.
 
 ### Q7: Why does the Web dashboard use a background AudioWorklet instead of running on the main browser thread?
 *   **Decision**: Offload audio Float32-to-Int16 conversions to a background audio thread (`pcm-processor.js`).

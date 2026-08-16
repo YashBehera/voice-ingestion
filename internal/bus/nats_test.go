@@ -1,13 +1,21 @@
 package bus
 
 import (
+	"os"
 	"sync"
 	"testing"
 	"time"
 )
 
 func TestNATSBusPublishSubscribe(t *testing.T) {
-	bus := NewNATSBus()
+	if os.Getenv("NATS_URL") == "" {
+		t.Skip("set NATS_URL to run this integration test against an official NATS server")
+	}
+
+	bus, err := NewNATSBus()
+	if err != nil {
+		t.Fatalf("Connect to configured NATS server: %v", err)
+	}
 	defer bus.Close()
 
 	var wg sync.WaitGroup
@@ -15,7 +23,7 @@ func TestNATSBusPublishSubscribe(t *testing.T) {
 
 	var receivedPayload string
 
-	err := bus.Subscribe("media.session.*", "test-group", func(msg Message) error {
+	err = bus.Subscribe("media.session.*", "test-group", func(msg Message) error {
 		receivedPayload = string(msg.Payload)
 		wg.Done()
 		return nil

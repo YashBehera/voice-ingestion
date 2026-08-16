@@ -23,7 +23,11 @@ func main() {
 	var droppedCount int64
 	maxConcurrent := int64(10)
 
-	eventBus := bus.NewNATSBus()
+	eventBus, err := bus.NewNATSBus()
+	if err != nil {
+		log.Fatalf("Failed to connect to NATS: %v", err)
+	}
+	defer eventBus.Close()
 
 	// Broadcast active queue stats back to worker telemetry hub
 	go func() {
@@ -40,7 +44,7 @@ func main() {
 		}
 	}()
 
-	err := eventBus.Subscribe(*topic, *group, func(msg bus.Message) error {
+	err = eventBus.Subscribe(*topic, *group, func(msg bus.Message) error {
 		// Backpressure load-shedding check
 		if atomic.LoadInt64(&processingCount) >= maxConcurrent {
 			atomic.AddInt64(&droppedCount, 1)

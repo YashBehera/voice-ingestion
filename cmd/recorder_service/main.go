@@ -37,9 +37,9 @@ func main() {
 	copy(header[0:4], []byte("RIFF"))
 	copy(header[8:12], []byte("WAVE"))
 	copy(header[12:16], []byte("fmt "))
-	binary.LittleEndian.PutUint32(header[16:20], 16) // Subchunk1Size
-	binary.LittleEndian.PutUint16(header[20:22], 1)  // PCM format
-	binary.LittleEndian.PutUint16(header[22:24], 1)  // Mono
+	binary.LittleEndian.PutUint32(header[16:20], 16)    // Subchunk1Size
+	binary.LittleEndian.PutUint16(header[20:22], 1)     // PCM format
+	binary.LittleEndian.PutUint16(header[22:24], 1)     // Mono
 	binary.LittleEndian.PutUint32(header[24:28], 48000) // Normalized 48kHz
 	binary.LittleEndian.PutUint32(header[28:32], 96000) // Byte rate (48000 * 2)
 	binary.LittleEndian.PutUint16(header[32:34], 2)     // Block align
@@ -57,7 +57,11 @@ func main() {
 	var droppedCount int64
 	maxConcurrent := int64(8)
 
-	eventBus := bus.NewNATSBus()
+	eventBus, err := bus.NewNATSBus()
+	if err != nil {
+		log.Fatalf("Failed to connect to NATS: %v", err)
+	}
+	defer eventBus.Close()
 
 	// Broadcast active queue stats back to worker telemetry hub
 	go func() {

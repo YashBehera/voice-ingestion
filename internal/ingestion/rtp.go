@@ -220,7 +220,6 @@ func (a *RTPAdapter) processPacket(data []byte) {
 			if skipped {
 				// Packet lost: trigger Packet Loss Concealment (PLC)
 				pcm, err = a.decoder.DecodeLost()
-				a.rtcpEngine.RecordLoss()
 			} else {
 				pcm, err = a.decoder.Decode(pkt.Payload)
 			}

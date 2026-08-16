@@ -123,3 +123,45 @@ func TestRedReceiverRecovery(t *testing.T) {
 		t.Fatalf("Failed to retrieve packet 2 cleanly after recovery")
 	}
 }
+
+func TestRedReceiverForcedSkip(t *testing.T) {
+	receiver := NewRedReceiver(3) // buffer capacity 3
+	
+	// Push packet 0
+	receiver.Push(MediaPacket{SequenceNumber: 0, PayloadType: 111, Payload: []byte("pkt0")})
+	// Pop packet 0
+	pkt, ok, skipped := receiver.PopNext(false)
+	if !ok || skipped || pkt.SequenceNumber != 0 {
+		t.Fatalf("Failed to pop packet 0")
+	}
+
+	// We lose packets 1, 2, 3 (not pushed).
+	// Then we push packet 4, 5, 6.
+	// Since capacity is 3, pushing 4, 5, 6 fills the buffer.
+	receiver.Push(MediaPacket{SequenceNumber: 4, PayloadType: 111, Payload: []byte("pkt4")})
+	receiver.Push(MediaPacket{SequenceNumber: 5, PayloadType: 111, Payload: []byte("pkt5")})
+	receiver.Push(MediaPacket{SequenceNumber: 6, PayloadType: 111, Payload: []byte("pkt6")})
+
+	// Now we call PopNext(false). Since buffer size is 3 >= maxBufferSize, it must skip!
+	// Under the new correct logic:
+	// Call 1: skip 1
+	p1, ok, skipped := receiver.PopNext(false)
+	if !ok || !skipped || p1.SequenceNumber != 1 {
+		t.Fatalf("Expected skipped packet 1, got ok=%v, skipped=%v, seq=%d", ok, skipped, p1.SequenceNumber)
+	}
+	// Call 2: skip 2
+	p2, ok, skipped := receiver.PopNext(false)
+	if !ok || !skipped || p2.SequenceNumber != 2 {
+		t.Fatalf("Expected skipped packet 2, got seq=%d", p2.SequenceNumber)
+	}
+	// Call 3: skip 3
+	p3, ok, skipped := receiver.PopNext(false)
+	if !ok || !skipped || p3.SequenceNumber != 3 {
+		t.Fatalf("Expected skipped packet 3, got seq=%d", p3.SequenceNumber)
+	}
+	// Call 4: pop packet 4 (valid!)
+	p4, ok, skipped := receiver.PopNext(false)
+	if !ok || skipped || p4.SequenceNumber != 4 || string(p4.Payload) != "pkt4" {
+		t.Fatalf("Expected valid packet 4, got ok=%v, skipped=%v, seq=%d, payload=%s", ok, skipped, p4.SequenceNumber, string(p4.Payload))
+	}
+}

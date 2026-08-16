@@ -54,6 +54,16 @@ func (e *RTCPFeedbackEngine) RecordArrival(seq uint16, rtpTimestamp uint32) {
 		e.jitter += (d - e.jitter) / 16.0
 	}
 	e.lastTransit = transit
+
+	// Detect sequence gaps in raw UDP packets to calculate network-level loss
+	if e.lastSeq != 0 {
+		diff := seq - e.lastSeq
+		if diff > 1 && diff < 30000 {
+			// All sequence numbers in the gap were dropped by the network
+			e.packetsLost += int64(diff - 1)
+		}
+	}
+
 	e.lastSeq = seq
 }
 

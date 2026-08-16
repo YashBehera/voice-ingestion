@@ -9,14 +9,10 @@ build:
 	docker build -t $(IMAGE_NAME):latest .
 
 run:
-	@echo "Running Voice Ingestion Worker container..."
+	@echo "Running NATS and the Voice Ingestion Worker..."
 	@echo "Access the dashboard at http://localhost:8080"
 	@echo "RTP port listening at udp://localhost:5004"
-	docker run --rm -it \
-		-p 8080:8080 \
-		-p 5004:5004/udp \
-		-v $$(pwd)/recordings:/app/recordings \
-		$(IMAGE_NAME):latest
+	docker compose up --build worker
 
 test:
 	@echo "Running Go tests inside Docker container..."

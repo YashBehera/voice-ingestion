@@ -40,8 +40,8 @@ flowchart TD
   Router -->|Stream Routing| W2
   Router -->|Stream Routing| W3
 
-  subgraph Broker["⑤ Distributed Message Bus (Clustered Fan-out)"]
-    NATS{"NATS JetStream / Kafka<br/>(Distributed Broadcast Topic)<br/>bus/nats.go"}
+  subgraph Broker["⑤ Official NATS Server"]
+    NATS{"NATS Core Pub/Sub<br/>(External Broker)<br/>nats:2.10-alpine"}
   end
 
   W1 & W2 & W3 -->|Publish RED packets| NATS
@@ -73,7 +73,7 @@ sequenceDiagram
     participant P as pipeline.go
     participant O as encoder.go
     participant R as red.go
-    participant B as nats.go (TCP Broker)
+    participant B as Official NATS Server
     participant C as consumers
 
     UI->>WS: ① binary PCM, 16 kHz
@@ -83,8 +83,8 @@ sequenceDiagram
     O-->>P: variable-length Opus payload
     P->>R: ⑤ Pack(Opus)
     R-->>P: RED MediaPacket
-    P->>B: ⑥ Publish via TCP NATS Broker
-    B->>C: ⑦ Load-balanced TCP subscriptions
+    P->>B: ⑥ Publish through the official NATS client
+    B->>C: ⑦ Queue-group subscription delivery
     C-->>C: ⑧ VAD, WAV recording, analytics 
 ```
 
@@ -116,17 +116,16 @@ docker run --rm voice-ingestion-builder:latest go test -v -race ./...
 
 ## Running the Server
 
-### 1. Start the Worker Container
-Mounts a local directory `recordings` to save files and starts the server:
+### 1. Start NATS and the Worker
+
+The worker requires an official NATS server. The supplied Compose file starts
+NATS and configures the worker with `NATS_URL=nats://nats:4222`:
 ```bash
-mkdir -p recordings
-docker run --rm -d \
-  --name voice-ingestion-worker \
-  -p 8080:8080 \
-  -p 5004:5004/udp \
-  -v $(pwd)/recordings:/app/recordings \
-  voice-ingestion:latest
+docker compose up --build worker
 ```
+
+For native processes, start `nats-server` separately and set `NATS_URL` if it
+is not available at `nats://127.0.0.1:4222`.
 
 ### 2. Open the Dashboard
 Point your browser to **[http://localhost:8080](http://localhost:8080)**.
